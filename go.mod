@@ -1,4 +1,4 @@
-module natt
+module github.com/0xBahamoot/go-libp2p-natt
 
 go 1.14
 
