@@ -12,6 +12,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 type Host struct {
@@ -146,17 +147,25 @@ func (h *Host) updateBroadcastAddr() error {
 	switch h.natType {
 	case network.ReachabilityUnknown, network.ReachabilityPrivate:
 		addrInfo := host.InfoFromHost(h.host)
-		h.broadcastAddr = fmt.Sprintf("%s/%s", addrInfo.Addrs[0].String(), addrInfo.ID)
+		hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/p2p/%s", addrInfo.ID.Pretty()))
+		fullAddr := addrInfo.Addrs[0].Encapsulate(hostAddr)
+		h.broadcastAddr = fullAddr.String()
 	case network.ReachabilityPublic:
 		if h.natDevice == nil {
 			addrInfo := host.InfoFromHost(h.host)
-			h.broadcastAddr = fmt.Sprintf("%s/%s", addrInfo.Addrs[0].String(), addrInfo.ID)
+			hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/p2p/%s", addrInfo.ID.Pretty()))
+			fullAddr := addrInfo.Addrs[0].Encapsulate(hostAddr)
+			h.broadcastAddr = fullAddr.String()
 		} else {
 			extAddr, err := h.natMapping.ExternalAddr()
 			if err != nil {
 				return ErrCantGetExternalAddress
 			}
-			h.broadcastAddr = fmt.Sprintf("/ip4/%s/tcp/%s/%s", extAddr.String(), strconv.Itoa(h.natMapping.ExternalPort()), h.host.ID())
+			addrInfo := host.InfoFromHost(h.host)
+			hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/p2p/%s", addrInfo.ID.Pretty()))
+			maAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%s", extAddr.String(), strconv.Itoa(h.natMapping.ExternalPort())))
+			fullAddr := maAddr.Encapsulate(hostAddr)
+			h.broadcastAddr = fullAddr.String()
 		}
 	default:
 		return ErrCantUpdateBroadcastAddress
