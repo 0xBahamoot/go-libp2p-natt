@@ -1,0 +1,16 @@
+package natt
+
+import "errors"
+
+var (
+	//ErrorShouldHaveIPAddress ...
+	ErrorShouldHaveIPAddress = errors.New("error machine should have an assigned IP address")
+	//ErrorNoNATDeviceFound ...
+	ErrorNoNATDeviceFound = errors.New("error no NAT devices found")
+	//ErrorCreatingHost ...
+	ErrorCreatingHost = errors.New("error creating host")
+	//ErrorCantUpdateBroadcastAddress ...
+	ErrorCantUpdateBroadcastAddress = errors.New("error cant update broadcast address")
+	//ErrorCantConnectToNATDiscoverAddress ...
+	ErrorCantConnectToNATDiscoverAddress = errors.New("error cant connect to NAT discover address")
+)

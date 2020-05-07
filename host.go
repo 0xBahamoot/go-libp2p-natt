@@ -62,7 +62,7 @@ func CreateHost(port int, NATdiscoverAddr string, autoNATService bool) (*Host, e
 	if err != nil {
 		return nil, err
 	}
-
+	host.host = &h
 	if autoNATService {
 		dialback, err := libp2p.New(ctx, libp2p.NoListenAddrs)
 		if err != nil {
@@ -111,7 +111,7 @@ func (h *Host) GetNATType() network.Reachability {
 	return h.natType
 }
 
-func (h *Host) GetBroadcastAddr() string {
+func (h *Host) GetBroadcastAddrInfo() string {
 	return h.broadcastAddr
 }
 
@@ -129,4 +129,22 @@ func (h *Host) GetMapping() Mapping {
 
 func (h *Host) Quit() {
 	h.cancel()
+}
+
+func (h *Host) GetInternalPort() int {
+	return h.intPort
+}
+
+func (h *Host) updateBroadcastAddr() error {
+	switch h.natType {
+	case network.ReachabilityUnknown:
+		addrInfo := host.InfoFromHost(*h.host)
+		h.broadcastAddr = fmt.Sprintf("/ip4/%s/tcp/%s", addrInfo.Addrs[0].String(), strconv.Itoa(h.intPort))
+	case network.ReachabilityPrivate:
+
+	case network.ReachabilityPublic:
+	default:
+		return ErrorCantUpdateBroadcastAddress
+	}
+	return nil
 }
