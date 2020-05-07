@@ -2,7 +2,6 @@ package natt
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -12,11 +11,6 @@ import (
 	goprocess "github.com/jbenet/goprocess"
 	periodic "github.com/jbenet/goprocess/periodic"
 	nat "github.com/libp2p/go-nat"
-)
-
-var (
-	// ErrNoMapping signals no mapping exists for an address
-	ErrNoMapping = errors.New("mapping not established")
 )
 
 var log = logging.Logger("nat")

@@ -24,7 +24,7 @@ func peerInfoFromString(peerAddr string) (*peer.AddrInfo, error) {
 func GetOutboundIP() net.IP {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		panic(ErrorShouldHaveIPAddress.Error())
+		panic(ErrShouldHaveIPAddress.Error())
 	}
 	for _, address := range addrs {
 		// check the address type and if it is not a loopback the display it
@@ -34,5 +34,5 @@ func GetOutboundIP() net.IP {
 			}
 		}
 	}
-	panic(ErrorShouldHaveIPAddress.Error())
+	panic(ErrShouldHaveIPAddress.Error())
 }

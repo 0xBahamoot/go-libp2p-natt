@@ -11,10 +11,11 @@ import (
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
 )
 
 type Host struct {
-	host          *host.Host
+	host          host.Host
 	natType       network.Reachability
 	broadcastAddr string
 	intPort       int
@@ -62,7 +63,7 @@ func CreateHost(port int, NATdiscoverAddr string, autoNATService bool) (*Host, e
 	if err != nil {
 		return nil, err
 	}
-	host.host = &h
+	host.host = h
 	if autoNATService {
 		dialback, err := libp2p.New(ctx, libp2p.NoListenAddrs)
 		if err != nil {
@@ -97,13 +98,19 @@ func CreateHost(port int, NATdiscoverAddr string, autoNATService bool) (*Host, e
 					panic("After status update, client did not know its status")
 				}
 				host.natType = stat.(network.Reachability)
+				err := host.updateBroadcastAddr()
+				if err != nil {
+					log.Fatal(err)
+				}
 			case <-ctx.Done():
 				return
 			}
 		}()
 
 	}
-
+	if err := host.updateBroadcastAddr(); err != nil {
+		return nil, err
+	}
 	return &host, nil
 }
 
@@ -119,7 +126,7 @@ func (h *Host) GetNATDevice() *NAT {
 	return h.natDevice
 }
 
-func (h *Host) GetHost() *host.Host {
+func (h *Host) GetHost() host.Host {
 	return h.host
 }
 
@@ -137,14 +144,26 @@ func (h *Host) GetInternalPort() int {
 
 func (h *Host) updateBroadcastAddr() error {
 	switch h.natType {
-	case network.ReachabilityUnknown:
-		addrInfo := host.InfoFromHost(*h.host)
-		h.broadcastAddr = fmt.Sprintf("/ip4/%s/tcp/%s", addrInfo.Addrs[0].String(), strconv.Itoa(h.intPort))
-	case network.ReachabilityPrivate:
-
+	case network.ReachabilityUnknown, network.ReachabilityPrivate:
+		addrInfo := host.InfoFromHost(h.host)
+		h.broadcastAddr = fmt.Sprintf("%s/%s", addrInfo.Addrs[0].String(), addrInfo.ID)
 	case network.ReachabilityPublic:
+		if h.natDevice == nil {
+			addrInfo := host.InfoFromHost(h.host)
+			h.broadcastAddr = fmt.Sprintf("%s/%s", addrInfo.Addrs[0].String(), addrInfo.ID)
+		} else {
+			extAddr, err := h.natMapping.ExternalAddr()
+			if err != nil {
+				return ErrCantGetExternalAddress
+			}
+			h.broadcastAddr = fmt.Sprintf("/ip4/%s/tcp/%s/%s", extAddr.String(), strconv.Itoa(h.natMapping.ExternalPort()), h.host.ID())
+		}
 	default:
-		return ErrorCantUpdateBroadcastAddress
+		return ErrCantUpdateBroadcastAddress
 	}
 	return nil
+}
+
+func (h *Host) GetHostID() peer.ID {
+	return h.host.ID()
 }
