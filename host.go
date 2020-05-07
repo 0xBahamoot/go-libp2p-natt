@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/libp2p/go-libp2p"
@@ -98,7 +99,8 @@ func CreateHost(port int, NATdiscoverAddr string, autoNATService bool) (*Host, e
 				if stat == network.ReachabilityUnknown {
 					panic("After status update, client did not know its status")
 				}
-				host.natType = stat.(network.Reachability)
+				t := stat.(event.EvtLocalReachabilityChanged)
+				host.natType = t.Reachability
 				err := host.updateBroadcastAddr()
 				if err != nil {
 					log.Fatal(err)
@@ -162,9 +164,9 @@ func (h *Host) updateBroadcastAddr() error {
 				return ErrCantGetExternalAddress
 			}
 			addrInfo := host.InfoFromHost(h.host)
-			hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/p2p/%s", addrInfo.ID.Pretty()))
-			maAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%s", extAddr.String(), strconv.Itoa(h.natMapping.ExternalPort())))
-			fullAddr := maAddr.Encapsulate(hostAddr)
+			addr := fmt.Sprintf("/ip4/%s/tcp/%s/p2p/%s", strings.Split(extAddr.String(), ":")[0], strconv.Itoa(h.natMapping.ExternalPort()), addrInfo.ID.Pretty())
+			fullAddr, _ := ma.NewMultiaddr(addr)
+
 			h.broadcastAddr = fullAddr.String()
 		}
 	default:
