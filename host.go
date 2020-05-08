@@ -37,31 +37,31 @@ func CreateHost(port int, NATdiscoverAddr string, autoNATService bool) (*Host, e
 	}
 	var hostAddrStr string
 
-	natDevice, err := checkNATDevice()
-	if err != nil {
-		fmt.Println(err)
-	}
+	// natDevice, err := checkNATDevice()
+	// if err != nil {
+	// 	fmt.Println(err)
+	// }
 
-	if natDevice != nil {
-		host.natDevice = natDevice
-		natMapping, err := createMapping(natDevice)
-		if err != nil {
-			return nil, err
-		}
-		host.natMapping = natMapping
-		hostAddr, err := natDevice.GetInternalAddress()
-		if err != nil {
-			return nil, err
-		}
-		hostAddrStr = hostAddr.String()
-	}
+	// if natDevice != nil {
+	// 	host.natDevice = natDevice
+	// 	natMapping, err := createMapping(natDevice)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	host.natMapping = natMapping
+	// 	hostAddr, err := natDevice.GetInternalAddress()
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	hostAddrStr = hostAddr.String()
+	// }
 
 	if hostAddrStr == "" {
 		hostAddr := GetOutboundIP()
 		hostAddrStr = hostAddr.String()
 	}
 
-	h, err := libp2p.New(ctx, libp2p.ListenAddrStrings("/ip4/"+hostAddrStr+"/tcp/"+strconv.Itoa(port)), libp2p.EnableNATService())
+	h, err := libp2p.New(ctx, libp2p.ListenAddrStrings("/ip4/"+hostAddrStr+"/tcp/"+strconv.Itoa(port)), libp2p.EnableNATService(), libp2p.NATPortMap())
 	if err != nil {
 		return nil, err
 	}

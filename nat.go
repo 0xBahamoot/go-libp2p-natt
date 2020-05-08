@@ -206,8 +206,8 @@ func checkNATDevice() (*NAT, error) {
 	return n, nil
 }
 
-func createMapping(natDevice *NAT) (Mapping, error) {
-	mp, err := natDevice.NewMapping("tcp", 8000)
+func createMapping(natDevice *NAT, intPort int) (Mapping, error) {
+	mp, err := natDevice.NewMapping("tcp", intPort)
 	if err != nil {
 		return nil, err
 	}
