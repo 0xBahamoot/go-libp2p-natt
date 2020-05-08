@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p"
-	autonat "github.com/libp2p/go-libp2p-autonat"
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
@@ -26,7 +25,7 @@ type Host struct {
 	cancel        context.CancelFunc
 }
 
-func CreateHost(port int, NATdiscoverAddr string, autoNATService bool) (*Host, error) {
+func CreateHost(port int, NATdiscoverAddr string) (*Host, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	host := Host{
@@ -35,47 +34,22 @@ func CreateHost(port int, NATdiscoverAddr string, autoNATService bool) (*Host, e
 		intPort:       port,
 		cancel:        cancel,
 	}
-	var hostAddrStr string
 
-	// natDevice, err := checkNATDevice()
-	// if err != nil {
-	// 	fmt.Println(err)
-	// }
-
-	// if natDevice != nil {
-	// 	host.natDevice = natDevice
-	// 	natMapping, err := createMapping(natDevice)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// 	host.natMapping = natMapping
-	// 	hostAddr, err := natDevice.GetInternalAddress()
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// 	hostAddrStr = hostAddr.String()
-	// }
-
-	if hostAddrStr == "" {
-		hostAddr := GetOutboundIP()
-		hostAddrStr = hostAddr.String()
+	natDevice, err := checkNATDevice()
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		host.natDevice = natDevice
 	}
+
+	hostAddr := GetOutboundIP()
+	hostAddrStr := hostAddr.String()
 
 	h, err := libp2p.New(ctx, libp2p.ListenAddrStrings("/ip4/"+hostAddrStr+"/tcp/"+strconv.Itoa(port)), libp2p.EnableNATService(), libp2p.NATPortMap())
 	if err != nil {
 		return nil, err
 	}
 	host.host = h
-	if autoNATService {
-		dialback, err := libp2p.New(ctx, libp2p.NoListenAddrs)
-		if err != nil {
-			return nil, err
-		}
-		_, err = autonat.New(ctx, h, autonat.EnableService(dialback.Network()))
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	if NATdiscoverAddr != "" {
 		serviceInf, err := peerInfoFromString(NATdiscoverAddr)
@@ -147,18 +121,23 @@ func (h *Host) GetInternalPort() int {
 
 func (h *Host) updateBroadcastAddr() error {
 	switch h.natType {
-	case network.ReachabilityUnknown, network.ReachabilityPrivate:
+	case network.ReachabilityUnknown:
+		return ErrCantUpdateBroadcastAddress
+	case network.ReachabilityPrivate:
+		//behind router that is nested NATs or that not support PCP protocol
 		addrInfo := host.InfoFromHost(h.host)
 		hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/p2p/%s", addrInfo.ID.Pretty()))
 		fullAddr := addrInfo.Addrs[0].Encapsulate(hostAddr)
 		h.broadcastAddr = fullAddr.String()
 	case network.ReachabilityPublic:
 		if h.natDevice == nil {
+			//public IP case
 			addrInfo := host.InfoFromHost(h.host)
 			hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/p2p/%s", addrInfo.ID.Pretty()))
 			fullAddr := addrInfo.Addrs[0].Encapsulate(hostAddr)
 			h.broadcastAddr = fullAddr.String()
 		} else {
+			//behind public IP router that support PCP protocol
 			extAddr, err := h.natMapping.ExternalAddr()
 			if err != nil {
 				return ErrCantGetExternalAddress
@@ -166,11 +145,8 @@ func (h *Host) updateBroadcastAddr() error {
 			addrInfo := host.InfoFromHost(h.host)
 			addr := fmt.Sprintf("/ip4/%s/tcp/%s/p2p/%s", strings.Split(extAddr.String(), ":")[0], strconv.Itoa(h.natMapping.ExternalPort()), addrInfo.ID.Pretty())
 			fullAddr, _ := ma.NewMultiaddr(addr)
-
 			h.broadcastAddr = fullAddr.String()
 		}
-	default:
-		return ErrCantUpdateBroadcastAddress
 	}
 	return nil
 }
