@@ -3,8 +3,8 @@ package natt
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/libp2p/go-libp2p"
@@ -12,7 +12,9 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	nat "github.com/libp2p/go-nat"
 	ma "github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr-net"
 )
 
 type Host struct {
@@ -20,8 +22,7 @@ type Host struct {
 	natType       network.Reachability
 	broadcastAddr string
 	intPort       int
-	natDevice     *NAT
-	natMapping    Mapping
+	natDevice     nat.NAT
 	cancel        context.CancelFunc
 }
 
@@ -35,7 +36,7 @@ func CreateHost(port int, NATdiscoverAddr string) (*Host, error) {
 		cancel:        cancel,
 	}
 
-	natDevice, err := checkNATDevice()
+	natDevice, err := checkNATDevice(ctx)
 	if err != nil {
 		fmt.Println(err)
 	} else {
@@ -61,6 +62,7 @@ func CreateHost(port int, NATdiscoverAddr string) (*Host, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		go func() {
 			cSub, err := h.EventBus().Subscribe(new(event.EvtLocalReachabilityChanged))
 			if err != nil {
@@ -99,16 +101,12 @@ func (h *Host) GetBroadcastAddrInfo() string {
 	return h.broadcastAddr
 }
 
-func (h *Host) GetNATDevice() *NAT {
-	return h.natDevice
-}
+// func (h *Host) GetNATDevice() nat.NAT {
+// 	return h.natDevice
+// }
 
 func (h *Host) GetHost() host.Host {
 	return h.host
-}
-
-func (h *Host) GetMapping() Mapping {
-	return h.natMapping
 }
 
 func (h *Host) Quit() {
@@ -121,31 +119,30 @@ func (h *Host) GetInternalPort() int {
 
 func (h *Host) updateBroadcastAddr() error {
 	switch h.natType {
-	case network.ReachabilityUnknown:
-		return ErrCantUpdateBroadcastAddress
-	case network.ReachabilityPrivate:
+	// case :
+	// 	return ErrCantUpdateBroadcastAddress
+	case network.ReachabilityUnknown, network.ReachabilityPrivate:
 		//behind router that is nested NATs or that not support PCP protocol
-		addrInfo := host.InfoFromHost(h.host)
-		hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/p2p/%s", addrInfo.ID.Pretty()))
-		fullAddr := addrInfo.Addrs[0].Encapsulate(hostAddr)
+		hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/p2p/%s", h.host.ID().Pretty()))
+		fullAddr := h.host.Addrs()[0].Encapsulate(hostAddr)
 		h.broadcastAddr = fullAddr.String()
 	case network.ReachabilityPublic:
 		if h.natDevice == nil {
 			//public IP case
-			addrInfo := host.InfoFromHost(h.host)
-			hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/p2p/%s", addrInfo.ID.Pretty()))
-			fullAddr := addrInfo.Addrs[0].Encapsulate(hostAddr)
+			hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/p2p/%s", h.host.ID().Pretty()))
+			fullAddr := h.host.Addrs()[0].Encapsulate(hostAddr)
 			h.broadcastAddr = fullAddr.String()
 		} else {
 			//behind public IP router that support PCP protocol
-			extAddr, err := h.natMapping.ExternalAddr()
-			if err != nil {
-				return ErrCantGetExternalAddress
+			for _, addr := range h.host.Addrs() {
+				if manet.IsPublicAddr(addr) {
+					hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/p2p/%s", h.host.ID().Pretty()))
+					fullAddr := addr.Encapsulate(hostAddr)
+					h.broadcastAddr = fullAddr.String()
+					return nil
+				}
 			}
-			addrInfo := host.InfoFromHost(h.host)
-			addr := fmt.Sprintf("/ip4/%s/tcp/%s/p2p/%s", strings.Split(extAddr.String(), ":")[0], strconv.Itoa(h.natMapping.ExternalPort()), addrInfo.ID.Pretty())
-			fullAddr, _ := ma.NewMultiaddr(addr)
-			h.broadcastAddr = fullAddr.String()
+
 		}
 	}
 	return nil
@@ -153,4 +150,8 @@ func (h *Host) updateBroadcastAddr() error {
 
 func (h *Host) GetHostID() peer.ID {
 	return h.host.ID()
+}
+
+func (h *Host) ConnectPeer(peerAddr string) error {
+	return nil
 }
