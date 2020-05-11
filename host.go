@@ -3,9 +3,12 @@ package natt
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"strconv"
 	"time"
+
+	mrand "math/rand"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/crypto"
@@ -51,7 +54,13 @@ func CreateHost(identityKey crypto.PrivKey, port int, NATdiscoverAddr string) (*
 	hostAddr := GetOutboundIP()
 	hostAddrStr := hostAddr.String()
 	if identityKey == nil {
+		var r io.Reader
+		r = mrand.New(mrand.NewSource(1))
 
+		identityKey, _, err = crypto.GenerateKeyPairWithReader(crypto.Ed25519, 0, r)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	h, err := libp2p.New(ctx, libp2p.ListenAddrStrings("/ip4/"+hostAddrStr+"/tcp/"+strconv.Itoa(port)), libp2p.EnableNATService(), libp2p.NATPortMap(), libp2p.Transport(tcp.NewTCPTransport), libp2p.Identity(identityKey))
