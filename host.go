@@ -8,25 +8,29 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	nat "github.com/libp2p/go-nat"
+	"github.com/libp2p/go-tcp-transport"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr-net"
 )
 
 type Host struct {
-	host          host.Host
-	natType       network.Reachability
-	broadcastAddr string
-	intPort       int
-	natDevice     nat.NAT
-	cancel        context.CancelFunc
+	host            host.Host
+	natType         network.Reachability
+	broadcastAddr   string
+	intPort         int
+	natDevice       nat.NAT
+	cancel          context.CancelFunc
+	traversalMethod TraversalMethod
+	identityKey     crypto.PrivKey
 }
 
-func CreateHost(port int, NATdiscoverAddr string) (*Host, error) {
+func CreateHost(identityKey crypto.PrivKey, port int, NATdiscoverAddr string) (*Host, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	host := Host{
@@ -34,6 +38,7 @@ func CreateHost(port int, NATdiscoverAddr string) (*Host, error) {
 		broadcastAddr: "",
 		intPort:       port,
 		cancel:        cancel,
+		identityKey:   identityKey,
 	}
 
 	natDevice, err := checkNATDevice(ctx)
@@ -45,11 +50,15 @@ func CreateHost(port int, NATdiscoverAddr string) (*Host, error) {
 
 	hostAddr := GetOutboundIP()
 	hostAddrStr := hostAddr.String()
+	if identityKey == nil {
 
-	h, err := libp2p.New(ctx, libp2p.ListenAddrStrings("/ip4/"+hostAddrStr+"/tcp/"+strconv.Itoa(port)), libp2p.EnableNATService(), libp2p.NATPortMap())
+	}
+
+	h, err := libp2p.New(ctx, libp2p.ListenAddrStrings("/ip4/"+hostAddrStr+"/tcp/"+strconv.Itoa(port)), libp2p.EnableNATService(), libp2p.NATPortMap(), libp2p.Transport(tcp.NewTCPTransport), libp2p.Identity(identityKey))
 	if err != nil {
 		return nil, err
 	}
+
 	host.host = h
 
 	if NATdiscoverAddr != "" {
@@ -100,10 +109,6 @@ func (h *Host) GetNATType() network.Reachability {
 func (h *Host) GetBroadcastAddrInfo() string {
 	return h.broadcastAddr
 }
-
-// func (h *Host) GetNATDevice() nat.NAT {
-// 	return h.natDevice
-// }
 
 func (h *Host) GetHost() host.Host {
 	return h.host

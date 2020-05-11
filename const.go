@@ -2,6 +2,15 @@ package natt
 
 import "errors"
 
+type TraversalMethod string
+
+const (
+	TraversalPMP       = "pmp"
+	TraversalHolePunch = "punching"
+	TraversalHW        = "highway"
+	TraversalNone      = "none"
+)
+
 var (
 	//ErrShouldHaveIPAddress ...
 	ErrShouldHaveIPAddress = errors.New("error machine should have an assigned IP address")
