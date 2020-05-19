@@ -7,7 +7,7 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 )
 
-func peerInfoFromString(peerAddr string) (*peer.AddrInfo, error) {
+func PeerInfoFromString(peerAddr string) (*peer.AddrInfo, error) {
 	pAddr, err := ma.NewMultiaddr(peerAddr)
 	if err != nil {
 		return nil, err
@@ -21,7 +21,8 @@ func peerInfoFromString(peerAddr string) (*peer.AddrInfo, error) {
 }
 
 // Get preferred outbound ip of this machine
-func GetOutboundIP() net.IP {
+func GetOutboundIP() []string {
+	var interfaces []string
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		panic(ErrShouldHaveIPAddress.Error())
@@ -30,9 +31,9 @@ func GetOutboundIP() net.IP {
 		// check the address type and if it is not a loopback the display it
 		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
 			if ipnet.IP.To4() != nil {
-				return ipnet.IP
+				interfaces = append(interfaces, ipnet.IP.String())
 			}
 		}
 	}
-	panic(ErrShouldHaveIPAddress.Error())
+	return interfaces
 }

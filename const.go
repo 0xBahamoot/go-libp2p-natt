@@ -26,4 +26,7 @@ var (
 	ErrNoMapping = errors.New("mapping not established")
 	// ErrCantGetExternalAddress ...
 	ErrCantGetExternalAddress = errors.New("error cant get external address")
+
+	// ErrCreateStream ...
+	ErrCreateStreamExist = errors.New("error stream of this protocol to this peerID already exist")
 )

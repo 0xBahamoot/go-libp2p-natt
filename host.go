@@ -25,7 +25,8 @@ import (
 type Host struct {
 	host            host.Host
 	natType         network.Reachability
-	broadcastAddr   string
+	broadcastAddr   []string
+	listenAddrs     []string
 	intPort         int
 	natDevice       nat.NAT
 	cancel          context.CancelFunc
@@ -33,12 +34,15 @@ type Host struct {
 	identityKey     crypto.PrivKey
 }
 
-func CreateHost(identityKey crypto.PrivKey, port int, NATdiscoverAddr string) (*Host, error) {
-	ctx, cancel := context.WithCancel(context.Background())
+func CreateHost(identityKey crypto.PrivKey, port int, NATdiscoverAddr string, pctx context.Context) (*Host, error) {
+	if pctx == nil {
+		pctx = context.Background()
+	}
+	ctx, cancel := context.WithCancel(pctx)
 
 	host := Host{
 		natType:       network.ReachabilityUnknown,
-		broadcastAddr: "",
+		broadcastAddr: []string{},
 		intPort:       port,
 		cancel:        cancel,
 		identityKey:   identityKey,
@@ -51,11 +55,18 @@ func CreateHost(identityKey crypto.PrivKey, port int, NATdiscoverAddr string) (*
 		host.natDevice = natDevice
 	}
 
-	hostAddr := GetOutboundIP()
-	hostAddrStr := hostAddr.String()
+	hostAddrs := GetOutboundIP()
+
+	var listenAddrs []string
+	for _, addr := range hostAddrs {
+		listenAddrs = append(listenAddrs, "/ip4/"+addr+"/tcp/"+strconv.Itoa(port))
+	}
+
+	copy(host.listenAddrs, listenAddrs)
+
 	if identityKey == nil {
 		var r io.Reader
-		r = mrand.New(mrand.NewSource(1))
+		r = mrand.New(mrand.NewSource(time.Now().UnixNano()))
 
 		identityKey, _, err = crypto.GenerateKeyPairWithReader(crypto.Ed25519, 0, r)
 		if err != nil {
@@ -63,7 +74,7 @@ func CreateHost(identityKey crypto.PrivKey, port int, NATdiscoverAddr string) (*
 		}
 	}
 
-	h, err := libp2p.New(ctx, libp2p.ListenAddrStrings("/ip4/"+hostAddrStr+"/tcp/"+strconv.Itoa(port)), libp2p.EnableNATService(), libp2p.NATPortMap(), libp2p.Transport(tcp.NewTCPTransport), libp2p.Identity(identityKey))
+	h, err := libp2p.New(ctx, libp2p.ListenAddrStrings(listenAddrs...), libp2p.EnableNATService(), libp2p.NATPortMap(), libp2p.Transport(tcp.NewTCPTransport), libp2p.Identity(identityKey))
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +82,7 @@ func CreateHost(identityKey crypto.PrivKey, port int, NATdiscoverAddr string) (*
 	host.host = h
 
 	if NATdiscoverAddr != "" {
-		serviceInf, err := peerInfoFromString(NATdiscoverAddr)
+		serviceInf, err := PeerInfoFromString(NATdiscoverAddr)
 		if err != nil {
 			return nil, err
 		}
@@ -80,27 +91,27 @@ func CreateHost(identityKey crypto.PrivKey, port int, NATdiscoverAddr string) (*
 		if err != nil {
 			return nil, err
 		}
-
 		go func() {
 			cSub, err := h.EventBus().Subscribe(new(event.EvtLocalReachabilityChanged))
 			if err != nil {
 				panic(err)
 			}
 			defer cSub.Close()
-
-			select {
-			case stat := <-cSub.Out():
-				if stat == network.ReachabilityUnknown {
-					panic("After status update, client did not know its status")
+			for {
+				select {
+				case stat := <-cSub.Out():
+					if stat == network.ReachabilityUnknown {
+						panic("After status update, client did not know its status")
+					}
+					t := stat.(event.EvtLocalReachabilityChanged)
+					host.natType = t.Reachability
+					err := host.updateBroadcastAddr()
+					if err != nil {
+						log.Fatal(err)
+					}
+				case <-ctx.Done():
+					return
 				}
-				t := stat.(event.EvtLocalReachabilityChanged)
-				host.natType = t.Reachability
-				err := host.updateBroadcastAddr()
-				if err != nil {
-					log.Fatal(err)
-				}
-			case <-ctx.Done():
-				return
 			}
 		}()
 
@@ -115,8 +126,10 @@ func (h *Host) GetNATType() network.Reachability {
 	return h.natType
 }
 
-func (h *Host) GetBroadcastAddrInfo() string {
-	return h.broadcastAddr
+func (h *Host) GetBroadcastAddrInfo() []string {
+	var result []string
+	copy(result, h.broadcastAddr)
+	return result
 }
 
 func (h *Host) GetHost() host.Host {
@@ -133,26 +146,33 @@ func (h *Host) GetInternalPort() int {
 
 func (h *Host) updateBroadcastAddr() error {
 	switch h.natType {
-	// case :
-	// 	return ErrCantUpdateBroadcastAddress
 	case network.ReachabilityUnknown, network.ReachabilityPrivate:
 		//behind router that is nested NATs or that not support PCP protocol
 		hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/p2p/%s", h.host.ID().Pretty()))
-		fullAddr := h.host.Addrs()[0].Encapsulate(hostAddr)
-		h.broadcastAddr = fullAddr.String()
+		var fullAddr []string
+		for _, addr := range h.host.Addrs() {
+			fullAddr = append(fullAddr, addr.Encapsulate(hostAddr).String())
+		}
+		h.broadcastAddr = fullAddr
 	case network.ReachabilityPublic:
 		if h.natDevice == nil {
 			//public IP case
 			hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/p2p/%s", h.host.ID().Pretty()))
-			fullAddr := h.host.Addrs()[0].Encapsulate(hostAddr)
-			h.broadcastAddr = fullAddr.String()
+			var fullAddr []string
+			for _, addr := range h.host.Addrs() {
+				fullAddr = append(fullAddr, addr.Encapsulate(hostAddr).String())
+			}
+			h.broadcastAddr = fullAddr
 		} else {
 			//behind public IP router that support PCP protocol
 			for _, addr := range h.host.Addrs() {
 				if manet.IsPublicAddr(addr) {
 					hostAddr, _ := ma.NewMultiaddr(fmt.Sprintf("/p2p/%s", h.host.ID().Pretty()))
-					fullAddr := addr.Encapsulate(hostAddr)
-					h.broadcastAddr = fullAddr.String()
+					var fullAddr []string
+					for _, addr := range h.host.Addrs() {
+						fullAddr = append(fullAddr, addr.Encapsulate(hostAddr).String())
+					}
+					h.broadcastAddr = fullAddr
 					return nil
 				}
 			}
@@ -168,4 +188,10 @@ func (h *Host) GetHostID() peer.ID {
 
 func (h *Host) ConnectPeer(peerAddr string) error {
 	return nil
+}
+
+func (h *Host) GetListenAddrs() []string {
+	var result []string
+	copy(result, h.listenAddrs)
+	return result
 }
