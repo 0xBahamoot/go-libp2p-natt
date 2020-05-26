@@ -30,3 +30,7 @@ var (
 	// ErrCreateStream ...
 	ErrCreateStreamExist = errors.New("error stream of this protocol to this peerID already exist")
 )
+
+const (
+	maxRelayPeer = 10
+)

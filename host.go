@@ -3,7 +3,6 @@ package natt
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"strconv"
 	"time"
@@ -11,11 +10,13 @@ import (
 	mrand "math/rand"
 
 	"github.com/libp2p/go-libp2p"
+	circuit "github.com/libp2p/go-libp2p-circuit"
 	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	config "github.com/libp2p/go-libp2p/config"
 	nat "github.com/libp2p/go-nat"
 	"github.com/libp2p/go-tcp-transport"
 	ma "github.com/multiformats/go-multiaddr"
@@ -23,18 +24,24 @@ import (
 )
 
 type Host struct {
-	host            host.Host
-	natType         network.Reachability
-	broadcastAddr   []string
-	listenAddrs     []string
-	intPort         int
-	natDevice       nat.NAT
-	cancel          context.CancelFunc
-	traversalMethod TraversalMethod
-	identityKey     crypto.PrivKey
+	host          host.Host
+	natType       network.Reachability
+	broadcastAddr []string
+	listenAddrs   []string
+	listenPort    int
+	natDevice     nat.NAT
+	cancel        context.CancelFunc
+	// traversalMethod TraversalMethod
+	identityKey crypto.PrivKey
+	ctx         context.Context
+
+	peerList           []peer.AddrInfo
+	relayPeerCandidate []peer.ID
+	relayPeerConns     []peer.ID
+	useRelayPeer       bool
 }
 
-func CreateHost(identityKey crypto.PrivKey, port int, NATdiscoverAddr string, pctx context.Context) (*Host, error) {
+func CreateHost(pctx context.Context, option Option) (*Host, error) {
 	if pctx == nil {
 		pctx = context.Background()
 	}
@@ -43,9 +50,11 @@ func CreateHost(identityKey crypto.PrivKey, port int, NATdiscoverAddr string, pc
 	host := Host{
 		natType:       network.ReachabilityUnknown,
 		broadcastAddr: []string{},
-		intPort:       port,
+		listenPort:    option.Port,
 		cancel:        cancel,
-		identityKey:   identityKey,
+		identityKey:   option.IdentityKey,
+		ctx:           ctx,
+		useRelayPeer:  option.UseRelayPeer,
 	}
 
 	natDevice, err := checkNATDevice(ctx)
@@ -59,30 +68,38 @@ func CreateHost(identityKey crypto.PrivKey, port int, NATdiscoverAddr string, pc
 
 	var listenAddrs []string
 	for _, addr := range hostAddrs {
-		listenAddrs = append(listenAddrs, "/ip4/"+addr+"/tcp/"+strconv.Itoa(port))
+		listenAddrs = append(listenAddrs, "/ip4/"+addr+"/tcp/"+strconv.Itoa(option.Port))
 	}
 
 	copy(host.listenAddrs, listenAddrs)
 
-	if identityKey == nil {
-		var r io.Reader
-		r = mrand.New(mrand.NewSource(time.Now().UnixNano()))
-
-		identityKey, _, err = crypto.GenerateKeyPairWithReader(crypto.Ed25519, 0, r)
+	if option.IdentityKey == nil {
+		r := mrand.New(mrand.NewSource(time.Now().UnixNano()))
+		option.IdentityKey, _, err = crypto.GenerateKeyPairWithReader(crypto.Ed25519, 0, r)
 		if err != nil {
 			panic(err)
 		}
 	}
 
-	h, err := libp2p.New(ctx, libp2p.ListenAddrStrings(listenAddrs...), libp2p.EnableNATService(), libp2p.NATPortMap(), libp2p.Transport(tcp.NewTCPTransport), libp2p.Identity(identityKey))
+	opts := []config.Option{}
+	opts = append(opts, libp2p.ListenAddrStrings(listenAddrs...))
+	opts = append(opts, libp2p.NATPortMap())
+	opts = append(opts, libp2p.EnableNATService())
+	opts = append(opts, libp2p.Transport(tcp.NewTCPTransport))
+	opts = append(opts, libp2p.Identity(option.IdentityKey))
+	if option.EnableRelay {
+		opts = append(opts, libp2p.EnableRelay(circuit.OptHop))
+	}
+
+	h, err := libp2p.New(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
 
 	host.host = h
 
-	if NATdiscoverAddr != "" {
-		serviceInf, err := PeerInfoFromString(NATdiscoverAddr)
+	if option.NATdiscoverAddr != "" {
+		serviceInf, err := PeerInfoFromString(option.NATdiscoverAddr)
 		if err != nil {
 			return nil, err
 		}
@@ -114,7 +131,17 @@ func CreateHost(identityKey crypto.PrivKey, port int, NATdiscoverAddr string, pc
 				}
 			}
 		}()
+	}
 
+	if host.useRelayPeer {
+		go func() {
+			ticker := time.NewTicker(5 * time.Second)
+			for {
+				<-ticker.C
+				host.lookforRelayPeers()
+				host.connectRelayPeer()
+			}
+		}()
 	}
 	if err := host.updateBroadcastAddr(); err != nil {
 		return nil, err
@@ -126,8 +153,8 @@ func (h *Host) GetNATType() network.Reachability {
 	return h.natType
 }
 
-func (h *Host) GetBroadcastAddrInfo() []string {
-	var result []string
+func (h *Host) GetBroadcastAddr() []string {
+	result := make([]string, len(h.broadcastAddr))
 	copy(result, h.broadcastAddr)
 	return result
 }
@@ -140,8 +167,8 @@ func (h *Host) Quit() {
 	h.cancel()
 }
 
-func (h *Host) GetInternalPort() int {
-	return h.intPort
+func (h *Host) GetListeningPort() int {
+	return h.listenPort
 }
 
 func (h *Host) updateBroadcastAddr() error {
@@ -152,6 +179,9 @@ func (h *Host) updateBroadcastAddr() error {
 		var fullAddr []string
 		for _, addr := range h.host.Addrs() {
 			fullAddr = append(fullAddr, addr.Encapsulate(hostAddr).String())
+		}
+		if h.useRelayPeer {
+			fullAddr = append(fullAddr, h.createRelayAddresses()...)
 		}
 		h.broadcastAddr = fullAddr
 	case network.ReachabilityPublic:
@@ -191,7 +221,15 @@ func (h *Host) ConnectPeer(peerAddr string) error {
 }
 
 func (h *Host) GetListenAddrs() []string {
-	var result []string
+	result := make([]string, len(h.listenAddrs))
 	copy(result, h.listenAddrs)
+	return result
+}
+
+func (h *Host) GetAllPeers() []peer.ID {
+	result := []peer.ID{}
+	for _, peer := range h.peerList {
+		result = append(result, peer.ID)
+	}
 	return result
 }
