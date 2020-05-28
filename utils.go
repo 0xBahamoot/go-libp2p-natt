@@ -46,3 +46,11 @@ func checkPeerIDExist(list []peer.ID, peerID peer.ID) bool {
 	}
 	return false
 }
+func peerIDsFromPeerInfos(peerInfo []peer.AddrInfo) []peer.ID {
+	result := make([]peer.ID, len(peerInfo))
+
+	for _, pInfo := range peerInfo {
+		result = append(result, pInfo.ID)
+	}
+	return result
+}

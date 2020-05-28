@@ -8,8 +8,6 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 )
 
-// TODO:
-// watch conn
 func (h *Host) createRelayAddresses() []string {
 	var result []string
 	for _, peerID := range h.relayPeerConns {

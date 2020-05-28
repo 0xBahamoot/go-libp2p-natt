@@ -106,16 +106,10 @@ func CreateHost(pctx context.Context, option Option) (*Host, error) {
 	host.host = h
 
 	if option.NATdiscoverAddr != "" {
-		serviceInf, err := PeerInfoFromString(option.NATdiscoverAddr)
+		err = host.ConnectPeer(option.NATdiscoverAddr)
 		if err != nil {
 			return nil, err
 		}
-		h.Peerstore().AddAddrs(serviceInf.ID, serviceInf.Addrs, time.Hour)
-		err = h.Connect(ctx, h.Peerstore().PeerInfo(serviceInf.ID))
-		if err != nil {
-			return nil, err
-		}
-		host.peerList = append(host.peerList, *serviceInf)
 		go func() {
 			cSub, err := h.EventBus().Subscribe(new(event.EvtLocalReachabilityChanged))
 			if err != nil {
@@ -226,6 +220,19 @@ func (h *Host) GetHostID() peer.ID {
 }
 
 func (h *Host) ConnectPeer(peerAddr string) error {
+	peerInfo, err := PeerInfoFromString(peerAddr)
+	if err != nil {
+		return err
+	}
+
+	if err := h.host.Connect(context.Background(), *peerInfo); err != nil {
+		return err
+	}
+
+	if !checkPeerIDExist(peerIDsFromPeerInfos(h.peerList), peerInfo.ID) {
+		h.peerList = append(h.peerList, *peerInfo)
+		h.host.Peerstore().AddAddrs(peerInfo.ID, peerInfo.Addrs, time.Hour)
+	}
 	return nil
 }
 
@@ -244,9 +251,11 @@ func (h *Host) GetAllPeers() []peer.ID {
 }
 
 func (h *Host) onPeerConnected(pID peer.ID) {
+	fmt.Println("onPeerConnected", pID)
 	h.currentConnectedPeer = append(h.currentConnectedPeer, pID)
 }
 func (h *Host) onPeerDisconnected(pID peer.ID) {
+	fmt.Println("onPeerDisconnected", pID)
 	for idx, peerID := range h.currentConnectedPeer {
 		if peerID == pID {
 			copy(h.currentConnectedPeer[idx:], h.currentConnectedPeer[idx+1:])
@@ -263,8 +272,9 @@ func (h *Host) onPeerDisconnected(pID peer.ID) {
 	}
 }
 func (h *Host) onPeerStreamOpened(pID peer.ID, strm network.Stream) {
+	fmt.Println("onPeerStreamOpened", pID)
 
 }
 func (h *Host) onPeerStreamClosed(pID peer.ID, strm network.Stream) {
-
+	fmt.Println("onPeerStreamClosed", pID)
 }
