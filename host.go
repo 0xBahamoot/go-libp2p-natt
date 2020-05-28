@@ -35,10 +35,11 @@ type Host struct {
 	identityKey crypto.PrivKey
 	ctx         context.Context
 
-	peerList           []peer.AddrInfo
-	relayPeerCandidate []peer.ID
-	relayPeerConns     []peer.ID
-	useRelayPeer       bool
+	peerList             []peer.AddrInfo
+	currentConnectedPeer []peer.ID
+	relayPeerCandidate   []peer.ID
+	relayPeerConns       []peer.ID
+	useRelayPeer         bool
 }
 
 func CreateHost(pctx context.Context, option Option) (*Host, error) {
@@ -95,7 +96,13 @@ func CreateHost(pctx context.Context, option Option) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	noti := notifee{
+		OnPeerConnected:    host.onPeerConnected,
+		OnPeerDisconnected: host.onPeerDisconnected,
+		OnPeerStreamOpened: host.onPeerStreamOpened,
+		OnPeerStreamClosed: host.onPeerStreamClosed,
+	}
+	h.Network().Notify(&noti)
 	host.host = h
 
 	if option.NATdiscoverAddr != "" {
@@ -108,6 +115,7 @@ func CreateHost(pctx context.Context, option Option) (*Host, error) {
 		if err != nil {
 			return nil, err
 		}
+		host.peerList = append(host.peerList, *serviceInf)
 		go func() {
 			cSub, err := h.EventBus().Subscribe(new(event.EvtLocalReachabilityChanged))
 			if err != nil {
@@ -138,8 +146,9 @@ func CreateHost(pctx context.Context, option Option) (*Host, error) {
 			ticker := time.NewTicker(5 * time.Second)
 			for {
 				<-ticker.C
-				host.lookforRelayPeers()
+				host.findRelayPeers()
 				host.connectRelayPeer()
+				host.updateBroadcastAddr()
 			}
 		}()
 	}
@@ -232,4 +241,30 @@ func (h *Host) GetAllPeers() []peer.ID {
 		result = append(result, peer.ID)
 	}
 	return result
+}
+
+func (h *Host) onPeerConnected(pID peer.ID) {
+	h.currentConnectedPeer = append(h.currentConnectedPeer, pID)
+}
+func (h *Host) onPeerDisconnected(pID peer.ID) {
+	for idx, peerID := range h.currentConnectedPeer {
+		if peerID == pID {
+			copy(h.currentConnectedPeer[idx:], h.currentConnectedPeer[idx+1:])
+			h.currentConnectedPeer[len(h.currentConnectedPeer)-1] = ""
+			h.currentConnectedPeer = h.currentConnectedPeer[:len(h.currentConnectedPeer)-1]
+		}
+	}
+	for idx, peerID := range h.relayPeerConns {
+		if peerID == pID {
+			copy(h.currentConnectedPeer[idx:], h.currentConnectedPeer[idx+1:])
+			h.currentConnectedPeer[len(h.currentConnectedPeer)-1] = ""
+			h.currentConnectedPeer = h.currentConnectedPeer[:len(h.currentConnectedPeer)-1]
+		}
+	}
+}
+func (h *Host) onPeerStreamOpened(pID peer.ID, strm network.Stream) {
+
+}
+func (h *Host) onPeerStreamClosed(pID peer.ID, strm network.Stream) {
+
 }

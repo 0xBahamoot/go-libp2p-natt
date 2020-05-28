@@ -37,3 +37,12 @@ func GetOutboundIP() []string {
 	}
 	return interfaces
 }
+
+func checkPeerIDExist(list []peer.ID, peerID peer.ID) bool {
+	for _, pID := range list {
+		if pID == peerID {
+			return true
+		}
+	}
+	return false
+}

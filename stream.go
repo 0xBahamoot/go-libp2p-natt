@@ -29,4 +29,5 @@ func (h *Host) CreateStream(ctx context.Context, protocol protocol.ID, peerID pe
 func (h *Host) SetProtocolStreamHanlder(protocol protocol.ID, handler network.StreamHandler) {
 	h.host.RemoveStreamHandler(protocol)
 	h.host.SetStreamHandler(protocol, handler)
+	// h.host.ConnManager().Notifee().
 }
